@@ -93,10 +93,10 @@ so it should be of value to anyone.
 	 +  Especially the intermediate results.
  
 ## Measuring Run-time Code Characteristics
-+ Profiling - `Rprof()` and `summaryRprof()`
-+ CallCounter package
++ Profiling - [`Rprof()`](https://www.rdocumentation.org/packages/utils/versions/3.6.2/topics/Rprof) and [`summaryRprof()`](https://www.rdocumentation.org/packages/utils/versions/3.6.2/topics/summaryRprof)
++ [CallCounter](https://github.com/duncantl/CallCounter) package
    + Determine how many times each function is called.
-+ `trace()` and collecting information about calls, e.g. length, class, typeof, dim of each argument.
++ [`trace()`](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/trace) and collecting information about calls, e.g. length, class, typeof, dim of each argument.
   + Need to know the maximum number of elements in each call.
 + Time the individual top-level expressions
    + `timeEval()` in timeEval.R
@@ -109,8 +109,8 @@ so it should be of value to anyone.
 
 
 ## Avoid
-+ `ifelse()`
-+ `Vectorize()`
++ [`ifelse()`](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/ifelse)
++ [`Vectorize()`](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/Vectorize)
     + If you do use this, specify the arguments being looped over and the scalars.
     + Vectorize functions using vectorized operations, not loops over arguments
 + `||` when you mean `|` (and `&&` versus `&`)
