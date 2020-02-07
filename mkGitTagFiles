@@ -1,0 +1,54 @@
+#!/bin/sh -x
+
+# Call as
+# mkGitTagFiles sha
+# mkGitTagFiles sha sha
+# mkGitTagFiles -r sha sha
+# mkGitTagFiles -r sha 
+#
+# Specify the Sandbox directory via the environment variable DIR
+#
+
+runR=""
+
+if test -z $DIR ; then
+    DIR=.
+fi
+export DIR
+
+if test $1 = "-r" ; then
+    runR="true"
+    shift
+fi
+
+sha=$1
+suffix=$2
+
+
+if test $# -lt 2 ; then
+  suffix="$1"
+fi    
+
+# Check the sha exists in the git repository.
+git cat-file -t $sha > /dev/null 2>&1
+
+# If not, fail
+if ! test $? -eq 0 ; then
+  echo "$sha is not a commit SHA in the git repository. Not creating the files."
+  exit 1
+fi
+
+echo "Creating functions_$suffix.R and TOY2_$suffix.R"
+
+# Extract the functions.R and TOY2.R file for this SHA value.
+git show $sha:functions.R > $DIR/functions_$suffix.R
+git show $sha:TOY2.R > $DIR/TOY2_$suffix.R
+
+# Add it to a file recording a map of sha to file suffix 
+echo "$sha,$suffix" >> $DIR/ShaFileMap
+
+# If the caller provided -r  as a third argument, run the code.
+if ! test "$runR" = "" ; then
+ echo "Running the R code"
+ ../runTag $DIR/functions_$suffix.R $DIR/TOY2_$suffix.R "$sha" 
+fi

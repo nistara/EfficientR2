@@ -1,0 +1,19 @@
+#!/bin/sh -x
+
+
+# Can be called with or without the SHA to be used as the name of the prefix for the .Rout file.
+# If only two arguments are given, these are functions_...R and TOY2.....R
+# and we compute the SHA from the suffix after functions_ and before the .R.
+# So, e.g.,
+#  runTag functions_123.R TOY2_123.R 123
+#  runTag functions_123.R TOY2_123.R
+# 
+
+SHA="$3"
+if test $# -lt 3 ; then
+  SHA=`echo "$1" | sed -e s/.R// | sed -e s/functions_//`
+fi
+
+echo "DIR=$DIR"
+
+Rscript -e 'source("../runTag.R"); runTag()'  "$1" "$2" > "$DIR/$SHA.Rout" 2>&1
