@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Making R Code More Efficient</title>
+    <meta charset="utf-8">
+    <style>
+      @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+      @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+
+      body { font-family: 'Droid Serif'; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Making R Code More Efficient
+
+
+## [https://github.com/dsidavis/EfficientR2](https://github.com/dsidavis/EfficientR2)
+
+### Duncan Temple Lang
+
+<div style="clear: both"/>
+
+<!-- <hr width="50%"/> -->
+<img src="http://dsi.ucdavis.edu/images/dsi_banner.png" height="40%"></img>
+
+---
+layout: true
+<img style="float: right" src="http://dsi.ucdavis.edu/images/dsi_brand_logo.png" height="20%" width="10%"></img>
+
+---
+# Making R Code Efficient
+
+--
+
++ Hands-on Case Study in
+   + Understanding other people's code
+   + Making it work
+   + Making it efficient
+
+--
+
++ Meta-programming
+   + Programmatically querying the code.
+   + Programming on the language.
+   + The code is the dataset.
+
+--
+
++ Focus on the thought process, evolution.
+   + not just the technical details.
+
+---
+# Context of Code
+
++  Optimal release of warm and cold water from a reservoir, impacting
+   fish populations down-stream and avoiding excessive water in rainy seasons and
+   droughts in dry periods.
+
++ Many thanks to Dr. Lauren Adams for sharing the problem and code.
+
+---
+# Starting point
+
++ Git repository [https://github.com:dsidavis/EfficientR2.git](https://github.com:dsidavis/EfficientR2.git)
+
++ R script [BIG.R](https://github.com:dsidavis/EfficientR2/BIG.R)
+
++ Examine it and discuss it with your neighbor about initial thoughts.
+
+--
+
++ What else do you need to run this code?
+
+--
+
++ What are the next steps you would take to make it work? faster?
+
+---
+# Running the Code
+
++ Will get an error and stop.
+
+--
+
+  + Fix and start again
+--
+
+  + Iterative and can take a long time to reach the error.
+
+--
+
++ Better approach?
+
+--
+
++ Can read the code, but doesn't scale when the code is large.
+
+--
+
++ Static code analysis.
+  + Programmatically query code
+  + Even modify it programmatically.
+
+---
+# Data/External Files
+
+--
+
++ Find what data files the script requires.
+
+--
+
++ CodeDepends
+```r
+info = getInputs(readScript("BIG.R"))
+unlist(sapply(info, function(x) x@files))
+```
+
+```
+       [1] "climateinputs5probs.csv"     ""
+       [3] "TwopoolAlldatav4.csv"        "GroupidExpectedVwVcTcTw.csv"
+```
+
+--
+
++ Alternatively, more precisely, find all calls to functions we know read files:
+```{r}
+library(rstatic)
+ast = to_ast(parse("TOY2.R"))
+k = find_nodes(ast, function(x) is(x, "Call") && is(x$fn, "Symbol") &&
+                                              x$fn$value %in% ReadFiles)
+sapply(k, function(x) sapply(x$args[sapply(x$args$contents, is, "Character")], `[[`, "value"))
+```
+
+
+---
+# Clearing the Global Environment
+
++ `rm(list = ls())`
+
++ Not a good idea as removes any existing variables:
+  + including any functions we define
+  + data we collected in other, separate computations
+  + removing any `trace()` actions we register.
+
++ Remove only the variables this script creates.
+
+
+---
+# `setwd()`
+
++ Calls to setwd() in script.
+
++ Purpose is to move to a directory so can read a file.
+```{r}
+setwd("C:/Users/leadams/Desktop/ShastaDam/Input_data")
+climate = read.csv("climateinputs5probs.csv")
+```
++ Uses path that is only on the author's machine.
+  + Not portable to another machine/user.
+
++ Use relative paths under this directory.
+
++ Symbolic links
+
+
+---
+# Unused Computations
+
++ Some expressions in script create variables that are never used.
+   + Waste of time.
+
++ How to identify these?
+  + CodeDepends
+
+```{r}
+info = getInputs(readScript("BIG.R"))
+```
+
+---
+# Functions
+
++ What are the functions defined in the script file?
+
++ Move them to a separate file.
+  + Why?
+
++ How do we know we got them all?
+
+[functions_orig.R](functions_orig.R)
+
+
+---
+# Script or Functions
+
++ Should we focus on the script or the functions?
+
+---
+# Relationships between Functions.
++ Which functions call which other functions.
+   +  The Call Graph
+
++ 
+```{r}
+fns = sourceFuns("functions_orig.R")
+```
+
++ What functions does the script call?
+```{r}
+library(rstatic)
+p = parse("TOY2.R")
+kalls = find_nodes(pa, is, "Call")
+pa = to_ast(p)
+intersect(sapply(kalls, function(x) x$fn$value), names(fns))
+```
+
+---
+# Testing Changes
+
++ We are going to make extensive changes to the code.
+   + Need to make certain we continue to get the same results.
+
+--
++ Compare `Best` variable to version from original code.
+
++ Also other variables created in the script.
+
++ Also all versions of top-level variables when they are created.
+
++ See `storeEval()` in CallCounter.
+
+---
+# Testing Functions
+
++ How do we test function give the same results?
+
+--
++ How do we generate test cases.
+  + That test the code as they are actually called
+
+--
++ Capture actual calls as they occur in running the script.
+
+--
++ Can manually add code to each function.
+
++ Instead, use trace() to programmatically add the code.
+
+--
++ Collect
+   + actual arguments
+   + values of global variables used by
+   + return value.
+
+---
+# collectCallResults()
+
+```
+source("functions_orig.R")
+fns = sourceFuns("functions_orig.R")
+callFns = lapply(names(fns), collectCallResults)
+names(callFns) = names(fns)
+source("TOY2.R")
+calls = lapply(callFns, function(f) f())
+```
+
++ Problem with the prep functions used in Vectorize() calls.
++ We're tracing them, but get no calls.
++ Need to trace the version in the function created by Vectorize()
+   + not the one in the global environment.
+
+```
+tmp = environment(v)$FUN
+ff = collectResults(tmp)
+environment(v)$FUN = tmp
+```
++ Non-standard evaluation in `trace()`.
+
+---
+# Testing Function Calls
+
++ Use the results from collectCallResults
+
++ testFunCall() calls a versoion of the functioncompares the 
+
+---
+# Call Information
+
++ Number of calls
++ length/dimension of arguments in each call
+
+
+---
+# Profiling
+
++ `Rprof()` is the key tool for our improvements
+```{r}
+Rprof("tmp.prof")
+source("TOY2.R")
+Rprof(NULL)  # stop collecting the information
+```
+
++ Generates information about the time spent in each function.
+
++ `summaryRprof()` to read it back into R
+```r
+p = summaryRprof("tmp.prof")
+head(p$by.self, 20)
+```
+
+---
+# Profiling
+
+```
+                  self.time self.pct total.time total.pct
+"ifelse"              82.44    15.00     534.94     97.35
+"mapply"              54.54     9.93     529.96     96.45
+"[.data.frame"        52.34     9.53     144.80     26.35
+"lapply"              31.76     5.78     109.54     19.94
+"do.call"             28.16     5.12     532.56     96.92
+"FUN"                 21.90     3.99      26.82      4.88
+"%in%"                17.22     3.13      23.42      4.26
+"unique"              16.32     2.97      34.90      6.35
+"names"               14.94     2.72      14.94      2.72
+"as.list"             14.10     2.57      47.66      8.67
+"Ops.factor"          12.70     2.31      27.10      4.93
+"which"               12.32     2.24     101.60     18.49
+"length"              11.60     2.11      11.60      2.11
+"match.call"          11.04     2.01      25.66      4.67
+"["                   10.58     1.93     148.84     27.09
+"unique.default"      10.12     1.84      14.30      2.60
+"levels"               9.88     1.80      13.32      2.42
+"sys.call"             9.20     1.67      10.76      1.96
+"(Anonymous)"          8.30     1.51     512.48     93.27
+"as.list.default"      7.90     1.44       7.90      1.44
+"c"                    7.78     1.42       7.78      1.42
+"=="                   7.74     1.41      34.84      6.34
+"simplify2array"       7.58     1.38      49.40      8.99
+"unlist"               6.70     1.22       6.70      1.22
+"sys.parent"           5.40     0.98       5.40      0.98
+"match.fun"            4.74     0.86       5.54      1.01
+"QLookup"              4.70     0.86     186.36     33.92
+"lengths"              4.28     0.78       4.28      0.78
+"parent.frame"         4.24     0.77       4.24      0.77
+"is.factor"            4.18     0.76       4.18      0.76
+"isFALSE"              4.04     0.74       4.96      0.90
+"is.na"                3.80     0.69       3.80      0.69
+".subset"              3.58     0.65       3.58      0.65
+"sys.function"         3.24     0.59       7.08      1.29
+"attributes"           2.62     0.48       2.62      0.48
+"TaLookup"             2.32     0.42      92.76     16.88
+```
+   
+
+---
+# Profiling
+    
++ Tells us which functions to focus on.
+
++ Doesn't tell us how many calls there are to each function
+  + Just total time in that function.
+    
+    
+---
+# Count the Number of Calls to a Function
+
++ How do we do this?
+
+--
++ Action on each call to a function
+
++ `trace()` function
+
++ give an expression or a function to evaluate or call
+  + either at start, end or particular expression in function.
+
+---
+# CallCounter Package
+
++ `countMCalls()` to count the number of calls to one or more functions.
+
++ Also want the length/dimension of each argument
+   + `gatherArgInfo()`
+
++ And to test changes to functions, need
+   + actual arguments
+   + values of global variables used by
+   + return value.
+
++ `collectCallResults()` for each function.
+   + Expensive in memory and also time.
+   + `testFunCall()` for the results.
+
++ call stack history 
+
+---
+# Vectorize()
+
++ How many of you know the Vectorize() function?
+
+--
++ What does it do?
+
+--
++ loop over elements of the arguments, passing one value from each argument
+  to target scalar function
+
++ Uses mapply() to loop
+  + Hence `mapply()` in profile table.
+  + also `do.call()`
+
++ Can we do better?
+   + Oh yeah!
+
+---
+# Vectorize
+
++ Consider finalinflow and finalinflowprep
+
+```{r}
+finalinflowprep=function(month,Q){ 
+  monthlyQ=ifelse(month == "January"|| month=="March"|| month=="June"||
+                  month=="July" ||month=="August"||month=="October" ||
+                  month=="December", 
+                  Q*1.98*31, 
+                  ifelse(month=="February", 
+                         Q*1.98*28,
+                         Q*1.98*30))
+  return(monthlyQ)
+}
+
+finalinflow=Vectorize(finalinflowprep)
+```
+
++ `finalinflowprep()` is a scalar function, but so close to being vectorized
+
+---
+# Vectorize()
+
++ Change || to | and can handle scalar values for month.
+
++ But also repeats code
+  + `Q*1.98* ..`
+
++ Can move this out
+   ```
+   Q*1.98*ifelse(....)
+   ```
+
++ So now need to compute the number of days in each month.
+
++ Rather than `ifelse()`, just use a named-vector.
+```
+MonthDays = c("January" = 31, "February" = 28, "March" = 31, "April" = 30,
+              "May" = 31, "June" = 30, "July" = 31, ...)
+Q * 1.98* MonthDays[month]
+```
+
++ finalinflow = finalinflowprep
+  + No Vectorize().
+
++ Create MonthDays once outside of function.
+
++ Found a simple bug with June and May reversed.
+
+---
+# [.data.frame
+
++ Consider `TaLookup`
+```{r}
+LookupTable[which((LookupTable[, 1] == VC) & (LookupTable[, 2] == VW)), 3]
+```
+
+--
++ First - remove the unnecessary `which()`.
+
+--
++ 3 calls to [.data.frame
+
++ Can be expensive as handles lookup by row name, index, logical vector, ...
+
++ Instead, let's use [[ ]]
+```{r}
+LookupTable[[3]][ (LookupTable[[1]] == VC) & (LookupTable[[2]] == VW) ]
+```
+
++ Faster.
+
+---
+# Two-way Table Lookup
+
+From ReleaseTemp()
+```{r}
+LookupTable[[3]][ (LookupTable[[1]] == VC) & (LookupTable[[2]] == VW) ]
+```
+
+Want to be able to vectorize in VC and VW
+
+
+```{r}
+TaLookupprep=function(month,p){
+  Ta=Lookupy[which(Lookupy[,1]==month & Lookupy[,2]==p),4] 
+  return(Ta)
+}
+```
+
++ Remove unnecessary assignment
+  + just return the value.
+```{r}
+TaLookupprep=function(month,p)
+  Lookupy[which(Lookupy[,1]==month & Lookupy[,2]==p),4] 
+```
+
++ How to vectorize in month and p?
+
+
+---
+# Focusing on the Script
+
++ Time the expressions in the TOY2.R script.
+
++ One stands out as taking the most amount of time.
+   `for(S in (NoofStages-1):2){`
+
++ This has 4 nested loops!
+
++ Consider
+```
+  for (r in 1:length(Rdecs)){
+    for (v in 1:length(Vstates)){
+      Rcaccumstar[v,r]=ifelse(is.na(isaccum[v,r]), NA, 
+                              Rcstar[which(Vcstates==Vcoutdirect[v,r] & Vwstates==Vwoutdirect[v,r]),S+1]
+      )
+      Rwaccumstar[v,r]=ifelse(is.na(isaccum[v,r]), NA, 
+                              Rwstar[which(Vcstates==Vcoutdirect[v,r] & Vwstates==Vwoutdirect[v,r]),S+1]
+    }
+   }
+```
+
++ How do we improve this?
+
+---
+# Improvements
+
++ We recompute several expressions
+  + `is.na(isaccum[v,r])`
+  + `which()`
+  + `Vcstates==Vcoutdirect[v,r] & Vwstates==Vwoutdirect[v,r])`
+  + `S+1`
+
++ Use a single if()
+
++ Can we reduce the number of iterations in the loop?
+
+---
+# Improvements (2)
+
++ Loop only over the elements/cells for which `isaccum` is NA.
+   + Is this common or rare?
+
++ `rows = which(is.na(isaccum), TRUE)`
+  + Gives us the row, columns of cells.
+
++ Then `for(i in rows)`
+
+
+---
+# Inlining Values
+
++ Consider TaLookup again
+```{r}
+TaLookup = function(month, p) 
+                   LookupyTa[ as.character(month), as.character(p) ]
+```
+
++ It has a global variable `LookupyTa`
++ Each time we call this, R has to find this variable.
+
++ If `LookupyTa` never changes after `TaLookupprep`
+  is first called, we can put the value of this variable
+  directly into the function.
+  + We *do NOT* want to add *the code* that creates LookupyTa
+    into the function. That would mean recomputing it in each  call
+    and also complicate where it is created in TOY2.R.
+    Instead, we want to take the already existing object and insert it
+   in place of the variable name `LookupyTa`.
+
++ Constant propogation.
+
+---
+# Inlining Values ctd.
+```{r}
+body(TaLookup)[[2]]
+class(body(TaLookup)[[2]])   # name
+body(TaLookup)[[2]] = LookupyTa
+```
+
++ Then the function prints as
+```{r}
+function (month, p) 
+c(-5.2, 0.3, 1.2, 3.4, 5.9, 5, 1.3, 0, -2.7, -5.9, -6.9, -4.5, 
+0, 3.5, 3.8, 0.9, 6.4, -1, 9, -1.8, -2.8, -6.9, -3.9, -5.1, -0.8, 
+-0.7, 4.3, 1.2, 1.9, 9.2, 3.9, -1.7, -2.7, -6, -6.3, -3.9, 1.2, 
+0.3, 1.1, 2.3, 7.7, 4, 2.6, -0.1, -2.8, -5.1, -6.8, -4.1, 3.7, 
+1.2, 0, 5.9, 0.2, 10, 3.1, 0.1, -3.1, -5.9, -6.4, -3.7)[as.character(month), 
+    as.character(p)]
+```
+
++ NOTE:  If we did this after we've optimized all the functions, we wouldn't
+  see much gain. This is because we dramatically reduce the number of calls
+  to TaLookup (and many others) and so the cumulative cost of the lookup is much smaller.
+
+
+---
+# Repeating the Same Computations
+
++ Consider
+```{r}
+Jelly=function(RT){
+      ifelse(7.74007 + 0.88836*RT < 30,
+             0,
+             7.74007 + 0.88836*RT)
+}
+``` 
+
++ Computing same thing in `test` and `no` arguments.
+   + `7.74007 + 0.88836*RT`
+
++ Compute once and assign
+```{r}
+Jelly=function(RT){
+      tmp = 7.74007 + 0.88836*RT
+      ifelse(tmp < 30, 0, tmp)
+}
+```
+---
+# `ifelse()`
+
++ For `Jelly` function, ifelse() is doing too much and so slower than necessary.
+
++ Can use `pmax(7.74007 + 0.88836*RT, 0)`
+
++ Or, more generally,
+```{r}
+Jelly=function(RT){
+    ans = 7.74007 + 0.88836*RT
+    ans[ans < 30] = 0
+    ans
+}
+```
+
++ How do we find these cases?
+  + Find all cases
+```{r}
+fns = sourceFuns("functions.R")
+lapply(fns, find_nodes(f) find_nodes(to_ast(f), function(x) is(x, "Call") && x$fn$value == "ifelse"))
+```
+
++ More generally, find arbitrary expression/computation that is repeated
+  + without intervening changes to any inputs
+  + See rstatic.
+
+---
+# Speedup by Step
+
+<!-- ![image - speedup factor](SpeedupByStage.png) -->
+<img src="SpeedupByStage.png" width=800 height=500/>
+
+
+
+---
+# Packages
++   [CallCounter](https://github.com/duncantl/CallCounter)
++   [CodeDepends](https://github.com/duncantl/CodeDepends)
++   [CodeAnalysis](https://github.com/duncantl/CodeAnalysis)
++   [rstatic](https://github.com/nick-ulle/rstatic)
++   [codetools](https://cran.r-project.org/web/packages/codetools/index.html)
++    R's own base package.
+
+
+
+---
+# Reproducing Timings, etc.
+
++ Use git to commit changes for each stage.
++ Add a git tag.
++ Shell script to checkout version of code for each tag and time run R script.
+
+
+
+    </textarea>
+    <script src="https://remarkjs.com/downloads/remark-latest.min.js">
+    </script>
+    <script src="remark-toc/index.js">     </script>   
+    <script>
+     var slideshow = remark.create();
+//     var toc = require('remark-toc');
+//     slideshow.use(toc);
+    </script>
+  </body>
+</html>
