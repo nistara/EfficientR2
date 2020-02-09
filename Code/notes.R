@@ -170,7 +170,7 @@ p = summaryRprof("tmp.prof")
 p$by.self # Duncan lives by this
 
 # ** Post profiling
-# Need to fix ifels() and Vectroize()
+# Need to fix ifelse() and Vectorize()
 # Only one functions calls it: finalinflowprep
 # There's a nested ifelse() in the function above
 # It took 15% of the time even though it was called only once
@@ -229,7 +229,7 @@ body(finalinflowprep)[[2]][[2]]
 body(finalinflowprep)[[2]][[2]][[2]]
 class(body(finalinflowprep)[[2]][[2]][[2]])
 
-body(finalinflowprep)[[2]][[2]][[2]] = MonthDays # It's inserted in the code directly now. Inlined the constant expression
+body(finalinflowprep)[[2]][[2]][[2]] = MonthDays # It's inserted in the code directly then. Inlined the constant expression
 # Constant propagation
 
 
