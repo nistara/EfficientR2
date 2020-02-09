@@ -1,0 +1,22 @@
+
+* Metaprogramming
+- Static
+- Dynamic - capture things as they're happening
+
+To avoid issues of rm(list = ls())
+
+e = new.env()
+cource("BIG.R", e)
+
+- new.env() creates a new environment
+- evaluate all commands inside `e` environment, which can look along the R searh path
+- it can see into the global env but it won't write into the glob env
+- find all the top level variables and remove them
+- top level - variable that's constructed
+- can have multiple environments in the same session
+
+* Bad functions
+- Vectorize()
+- ifelse()
+- data.frame, while not bad, can take up time as well
+
